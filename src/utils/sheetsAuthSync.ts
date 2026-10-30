@@ -1,5 +1,6 @@
 import { OperatorSession, SheetsProductItem, Product } from '../types';
 import { getLocalAvailabilityMap } from './storage';
+import { detectDevice } from './deviceDetector';
 
 const SESSION_STORAGE_KEY = 'balanca_operator_session';
 const API_URL_STORAGE_KEY = 'balanca_sheets_api_url';
@@ -110,19 +111,22 @@ export interface LoginResult {
 }
 
 /**
- * Autentica o operador com matrícula e senha individual
+ * Autentica o operador com matrícula, senha individual e identificação do aparelho
  */
 export async function loginOperator(
   apiUrl: string,
   matricula: string,
-  senha: string
+  senha: string,
+  aparelhoInfo?: string
 ): Promise<LoginResult> {
   try {
     const cleanUrl = sanitizeApiUrl(apiUrl);
+    const dispositivo = (aparelhoInfo && aparelhoInfo.trim()) || (await detectDevice());
     const data = await postToAppsScript(cleanUrl, {
       action: 'login',
       matricula: matricula.trim(),
       senha: senha,
+      aparelho: dispositivo,
     });
 
     if (data.sucesso && data.token) {
@@ -131,6 +135,7 @@ export async function loginOperator(
         matricula: data.operador?.matricula || matricula.trim(),
         nome: data.operador?.nome || 'Operador',
         expiresAt: data.expiresAt || Date.now() + 30 * 24 * 60 * 60 * 1000,
+        aparelho: data.operador?.aparelho || dispositivo || 'Aparelho não identificado',
       };
       saveStoredSession(sessao);
       return { sucesso: true, sessao, diagnostico: data.diagnostico };

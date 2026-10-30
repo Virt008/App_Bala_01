@@ -99,9 +99,9 @@ function processarRequisicao(e, metodoHttp) {
       });
     }
 
-    // Rota 1: Login de Operador (Matrícula + Senha)
+    // Rota 1: Login de Operador (Matrícula + Senha + Aparelho)
     if (action === 'login') {
-      return rotaLogin(bodyParams.matricula, bodyParams.senha);
+      return rotaLogin(bodyParams.matricula, bodyParams.senha, bodyParams.aparelho);
     }
 
     // Rota 2: Logout / Encerramento de Sessão
@@ -385,7 +385,7 @@ function mapearColunasOperadores(linha) {
 // =========================================================================
 // ROTA 1: LOGIN DO OPERADOR
 // =========================================================================
-function rotaLogin(matricula, senha) {
+function rotaLogin(matricula, senha, aparelho) {
   var diag = {
     planilhaEncontrada: false,
     abaOperadoresEncontrada: false,
@@ -624,19 +624,24 @@ function rotaLogin(matricula, senha) {
   // Gera token de sessão criptográfico (dois UUIDs combinados)
   var token = Utilities.getUuid() + '-' + Utilities.getUuid();
   var agora = new Date();
-  var expiresAt = new Date(agora.getTime() + (CONFIG.DURACAO_SESSAO_DIAS * 24 * 60 * 60 * 1000));
+  var expiraEm = new Date(agora.getTime() + (CONFIG.DURACAO_SESSAO_DIAS * 24 * 60 * 60 * 1000));
 
-  salvarSessao(token, operadorEncontrado.matricula, operadorEncontrado.nome, expiresAt);
+  var aparelhoIdentificado = (aparelho && typeof aparelho === 'string' && aparelho.trim() !== '')
+    ? String(aparelho).trim()
+    : 'Aparelho não identificado';
+
+  salvarSessao(token, operadorEncontrado.matricula, operadorEncontrado.nome, expiraEm, aparelhoIdentificado);
 
   diag.etapaFalha = null;
 
   return responderJSON({
     sucesso: true,
     token: token,
-    expiresAt: expiresAt.getTime(),
+    expiresAt: expiraEm.getTime(),
     operador: {
       matricula: operadorEncontrado.matricula,
-      nome: operadorEncontrado.nome
+      nome: operadorEncontrado.nome,
+      aparelho: aparelhoIdentificado
     },
     diagnostico: diag
   });
@@ -976,11 +981,15 @@ function validarSessao(token) {
         abaSessoes.deleteRow(i + 1);
         return { valido: false, motivo: 'Sessão expirada. Faça login novamente.' };
       }
+      var aparelhoSessao = (dadosSessoes[i].length > 5 && dadosSessoes[i][5] != null && String(dadosSessoes[i][5]).trim() !== '')
+        ? String(dadosSessoes[i][5]).trim()
+        : 'Aparelho não identificado';
       sessaoEncontrada = {
         token: cleanToken,
         matricula: String(dadosSessoes[i][1]).trim(),
         nome: String(dadosSessoes[i][2]).trim(),
-        expiresAt: exp
+        expiresAt: exp,
+        aparelho: aparelhoSessao
       };
       linhaSessao = i + 1;
       break;
@@ -1027,20 +1036,35 @@ function validarSessao(token) {
     valido: true,
     operador: {
       matricula: sessaoEncontrada.matricula,
-      nome: sessaoEncontrada.nome
+      nome: sessaoEncontrada.nome,
+      aparelho: sessaoEncontrada.aparelho
     }
   };
 }
 
 /**
- * Salva a nova sessão na aba Sessoes e limpa sessões expiradas antigas
+ * Salva a nova sessão na aba Sessoes com os 6 campos estruturados (A até F):
+ * A: Token, B: Matricula, C: Nome, D: ExpiraEm, E: CriadoEm, F: Aparelho
+ * Limpa sessões expiradas antigas sem alterar sessões válidas
  */
-function salvarSessao(token, matricula, nome, expiresAt) {
+function salvarSessao(token, matricula, nome, expiraEm, aparelho) {
   var ss = obterPlanilha();
   var abaSessoes = ss.getSheetByName(CONFIG.ABA_SESSOES);
   if (!abaSessoes) {
     abaSessoes = ss.insertSheet(CONFIG.ABA_SESSOES);
-    abaSessoes.appendRow(['Token', 'Matricula', 'Nome', 'ExpiraEm', 'CriadoEm']);
+    abaSessoes.appendRow(['Token', 'Matricula', 'Nome', 'ExpiraEm', 'CriadoEm', 'Aparelho']);
+    abaSessoes.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+  } else {
+    // Garante que o cabeçalho da coluna E (E1) seja 'CriadoEm'
+    var cabecalhoE = abaSessoes.getRange(1, 5).getValue();
+    if (!cabecalhoE || String(cabecalhoE).trim() === '' || String(cabecalhoE).trim().toLowerCase() === 'aparelho') {
+      abaSessoes.getRange(1, 5).setValue('CriadoEm').setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+    }
+    // Garante que o cabeçalho da coluna F (F1) seja 'Aparelho'
+    var cabecalhoF = abaSessoes.getRange(1, 6).getValue();
+    if (!cabecalhoF || String(cabecalhoF).trim() === '') {
+      abaSessoes.getRange(1, 6).setValue('Aparelho').setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+    }
   }
 
   try {
@@ -1054,7 +1078,15 @@ function salvarSessao(token, matricula, nome, expiresAt) {
     }
   } catch (eLimpeza) {}
 
-  abaSessoes.appendRow([token, matricula, nome, expiresAt, new Date()]);
+  var aparelhoFinal = (aparelho && typeof aparelho === 'string' && aparelho.trim() !== '')
+    ? String(aparelho).trim()
+    : 'Aparelho não identificado';
+
+  var criadoEm = new Date();
+
+  // Registra exatamente seis valores de A até F:
+  // A: Token | B: Matricula | C: Nome | D: ExpiraEm | E: CriadoEm | F: Aparelho
+  abaSessoes.appendRow([token, matricula, nome, expiraEm, criadoEm, aparelhoFinal]);
 }
 
 // =========================================================================
@@ -1344,9 +1376,20 @@ function inicializarSistema() {
   var abaSess = ss.getSheetByName(CONFIG.ABA_SESSOES);
   if (!abaSess) {
     abaSess = ss.insertSheet(CONFIG.ABA_SESSOES);
-    abaSess.appendRow(['Token', 'Matricula', 'Nome', 'ExpiraEm', 'CriadoEm']);
-    abaSess.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
-    Logger.log('Aba "Sessoes" criada.');
+    abaSess.appendRow(['Token', 'Matricula', 'Nome', 'ExpiraEm', 'CriadoEm', 'Aparelho']);
+    abaSess.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+    Logger.log('Aba "Sessoes" criada com 6 colunas (A até F).');
+  } else {
+    // Garante que o cabeçalho da coluna E (E1) seja 'CriadoEm'
+    var cabecalhoE = abaSess.getRange(1, 5).getValue();
+    if (!cabecalhoE || String(cabecalhoE).trim() === '' || String(cabecalhoE).trim().toLowerCase() === 'aparelho') {
+      abaSess.getRange(1, 5).setValue('CriadoEm').setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+    }
+    // Garante que o cabeçalho da coluna F (F1) seja 'Aparelho'
+    var cabecalhoF = abaSess.getRange(1, 6).getValue();
+    if (!cabecalhoF || String(cabecalhoF).trim() === '') {
+      abaSess.getRange(1, 6).setValue('Aparelho').setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+    }
   }
 }
 
@@ -1497,6 +1540,7 @@ function onOpen() {
       .addItem('4. Desativar Operador', 'desativarOperadorViaPrompt')
       .addSeparator()
       .addItem('5. Diagnóstico Seguro da Aba Operadores', 'diagnosticarAbaOperadoresViaPrompt')
+      .addItem('6. Atualizar Aba Sessoes (Garantir Coluna F: Aparelho)', 'migrarAbaSessoesViaPrompt')
       .addToUi();
   } catch (e) {}
 }
@@ -1736,3 +1780,89 @@ function diagnosticarAbaOperadoresViaPrompt() {
 
   ui.alert('Diagnóstico Seguro da Planilha', msg, ui.ButtonSet.OK);
 }
+
+/**
+ * =========================================================================
+ * ROTINA SEGURA DE MIGRAÇÃO: ABA SESSOES (6 COLUNAS: A até F)
+ * =========================================================================
+ * Estrutura obrigatória e definitiva da aba Sessoes:
+ * A = Token
+ * B = Matricula
+ * C = Nome
+ * D = ExpiraEm
+ * E = CriadoEm
+ * F = Aparelho
+ * 
+ * SEGURANÇA GARANTIDA:
+ * - Não invalida nenhum token
+ * - Preserva integralmente os dados existentes nas colunas A até E
+ * - Garante E1 = 'CriadoEm' e F1 = 'Aparelho'
+ * - Não apaga nem reorganiza sessões antigas
+ */
+function migrarAbaSessoes() {
+  var ss = obterPlanilha();
+  var abaSess = ss.getSheetByName(CONFIG.ABA_SESSOES);
+  if (!abaSess) {
+    Logger.log('Aba Sessoes não encontrada para migração.');
+    return { sucesso: false, erro: 'Aba Sessoes não encontrada na planilha.' };
+  }
+
+  // 1. Garante cabeçalho 'CriadoEm' na coluna E (E1)
+  var cabecalhoE = abaSess.getRange(1, 5).getValue();
+  if (!cabecalhoE || String(cabecalhoE).trim() === '' || String(cabecalhoE).trim().toLowerCase() === 'aparelho') {
+    abaSess.getRange(1, 5).setValue('CriadoEm').setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+    Logger.log('Cabeçalho da coluna E (E1) garantido como "CriadoEm".');
+  }
+
+  // 2. Garante cabeçalho 'Aparelho' na coluna F (F1)
+  var cabecalhoF = abaSess.getRange(1, 6).getValue();
+  if (!cabecalhoF || String(cabecalhoF).trim() === '') {
+    abaSess.getRange(1, 6).setValue('Aparelho').setFontWeight('bold').setBackground('#0f172a').setFontColor('#38bdf8');
+    Logger.log('Cabeçalho da coluna F (F1) garantido como "Aparelho".');
+  }
+
+  var dados = abaSess.getDataRange().getValues();
+  if (dados.length <= 1) {
+    Logger.log('Nenhuma linha de sessão encontrada para migrar.');
+    return { sucesso: true, sessoesAtualizadas: 0 };
+  }
+
+  var atualizadas = 0;
+  for (var i = 1; i < dados.length; i++) {
+    // Coluna F corresponde ao índice 5 do array (base 0)
+    var valF = dados[i].length > 5 ? String(dados[i][5] || '').trim() : '';
+    if (!valF) {
+      abaSess.getRange(i + 1, 6).setValue('Aparelho não identificado');
+      atualizadas++;
+    }
+  }
+
+  Logger.log('Migração concluída com sucesso. ' + atualizadas + ' sessões atualizadas na coluna F.');
+  return { sucesso: true, sessoesAtualizadas: atualizadas };
+}
+
+/**
+ * Executa a migração da aba Sessoes com alerta interativo no Google Sheets
+ */
+function migrarAbaSessoesViaPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var res = migrarAbaSessoes();
+    if (res.sucesso) {
+      ui.alert(
+        'Estrutura da Aba Sessoes Confirmada',
+        'Estrutura com 6 colunas (A até F) validada com sucesso!\n\n' +
+        '• Coluna E (E1): "CriadoEm" preservado.\n' +
+        '• Coluna F (F1): "Aparelho" garantido.\n' +
+        '• Sessões com coluna F preenchidas com "Aparelho não identificado": ' + res.sessoesAtualizadas + '\n' +
+        '• Nenhuma sessão ou dado de A até E foi alterado ou apagado.',
+        ui.ButtonSet.OK
+      );
+    } else {
+      ui.alert('Aviso', res.erro || 'Falha ao migrar aba Sessoes.', ui.ButtonSet.OK);
+    }
+  } catch (err) {
+    ui.alert('Erro na Migração', err.message, ui.ButtonSet.OK);
+  }
+}
+

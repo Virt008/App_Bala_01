@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   Download,
@@ -23,8 +23,10 @@ import {
   EyeOff,
   Database,
   ExternalLink,
+  Smartphone,
 } from 'lucide-react';
 import { Product, OperatorSession } from '../types';
+import { detectDevice } from '../utils/deviceDetector';
 import {
   downloadCsvFile,
   parseCsvContent,
@@ -114,6 +116,17 @@ export const DataBackupModal: React.FC<DataBackupModalProps> = ({
     totalNovos?: number;
     totalAtualizados?: number;
   } | null>(null);
+  const [detectedModel, setDetectedModel] = useState<string>('Detectando...');
+
+  useEffect(() => {
+    let ativo = true;
+    detectDevice().then((model) => {
+      if (ativo) setDetectedModel(model);
+    });
+    return () => {
+      ativo = false;
+    };
+  }, []);
 
   const fileCsvInputRef = useRef<HTMLInputElement>(null);
   const fileBackupInputRef = useRef<HTMLInputElement>(null);
@@ -224,7 +237,8 @@ export const DataBackupModal: React.FC<DataBackupModalProps> = ({
     setLoginDiagnostics(null);
     setIsLoggingIn(true);
     try {
-      const res = await loginOperator(apiUrl, matriculaInput, senhaInput);
+      const aparelhoParaEnvio = detectedModel !== 'Detectando...' ? detectedModel : undefined;
+      const res = await loginOperator(apiUrl, matriculaInput, senhaInput, aparelhoParaEnvio);
       if (res.sucesso && res.sessao) {
         setSession(res.sessao);
         setSenhaInput('');
@@ -817,6 +831,14 @@ export const DataBackupModal: React.FC<DataBackupModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Identificação do aparelho detectado */}
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] text-slate-400">
+                    <Smartphone className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <span className="truncate">
+                      Aparelho identificado: <strong className="text-slate-200">{detectedModel}</strong>
+                    </span>
+                  </div>
+
                   {loginError && (
                     <div className="p-2.5 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-xs flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -1023,6 +1045,12 @@ export const DataBackupModal: React.FC<DataBackupModalProps> = ({
                         <p className="text-[11px] text-emerald-400/90 font-medium">
                           Sessão autenticada e ativa na planilha
                         </p>
+                        <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-300">
+                          <Smartphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>
+                            Sessão iniciada em <strong className="text-white font-medium">{session.aparelho || 'Aparelho não identificado'}</strong>
+                          </span>
+                        </div>
                       </div>
                     </div>
 

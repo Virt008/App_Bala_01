@@ -26,6 +26,7 @@ export interface OperatorSession {
   matricula: string;
   nome: string;
   expiresAt: number;
+  aparelho?: string;
 }
 
 export interface SheetsProductItem {
