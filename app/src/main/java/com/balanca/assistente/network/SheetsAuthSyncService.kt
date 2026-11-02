@@ -41,39 +41,55 @@ object SheetsAuthSyncService {
     /**
      * Realiza login por Matrícula e Senha Individual contra o Google Apps Script
      */
-    fun login(endpointUrl: String, matricula: String, senha: String): LoginResult {
-        return try {
-            val postData = "action=login" +
-                    "&matricula=" + URLEncoder.encode(matricula.trim(), "UTF-8") +
-                    "&senha=" + URLEncoder.encode(senha, "UTF-8")
-
-            val jsonStr = executeHttpRequest(endpointUrl, "POST", postData)
-            val json = JSONObject(jsonStr)
-
-            if (json.optBoolean("sucesso", false)) {
-                val token = json.getString("token")
-                val expiresAt = json.optLong("expiresAt", System.currentTimeMillis() + 30L * 24 * 3600 * 1000)
-                val opJson = json.optJSONObject("operador")
-                val opNome = opJson?.optString("nome", "Operador") ?: "Operador"
-                val opMat = opJson?.optString("matricula", matricula.trim()) ?: matricula.trim()
-
-                LoginResult.Success(
-                    OperatorSession(
-                        token = token,
-                        matricula = opMat,
-                        nome = opNome,
-                        expiresAt = expiresAt
-                    )
-                )
-            } else {
-                val erro = json.optString("erro", "Matrícula ou senha incorretos.")
-                LoginResult.Error(erro)
-            }
-        } catch (e: Exception) {
-            LoginResult.Error("Falha de conexão com o servidor: ${e.localizedMessage ?: "Verifique a internet"}")
+    fun login(
+    endpointUrl: String,
+    matricula: String,
+    senha: String,
+    aparelho: String
+): LoginResult {
+    return try {
+        val aparelhoIdentificado = aparelho.trim().ifBlank {
+            "Android não identificado"
         }
-    }
 
+        val postData = "action=login" +
+                "&matricula=" + URLEncoder.encode(matricula.trim(), "UTF-8") +
+                "&senha=" + URLEncoder.encode(senha, "UTF-8") +
+                "&aparelho=" + URLEncoder.encode(aparelhoIdentificado, "UTF-8")
+
+        val jsonStr = executeHttpRequest(endpointUrl, "POST", postData)
+        val json = JSONObject(jsonStr)
+
+        if (json.optBoolean("sucesso", false)) {
+            val token = json.getString("token")
+            val expiresAt = json.optLong(
+                "expiresAt",
+                System.currentTimeMillis() + 30L * 24 * 3600 * 1000
+            )
+
+            val opJson = json.optJSONObject("operador")
+            val opNome = opJson?.optString("nome", "Operador") ?: "Operador"
+            val opMat = opJson?.optString("matricula", matricula.trim())
+                ?: matricula.trim()
+
+            LoginResult.Success(
+                OperatorSession(
+                    token = token,
+                    matricula = opMat,
+                    nome = opNome,
+                    expiresAt = expiresAt
+                )
+            )
+        } else {
+            val erro = json.optString("erro", "Matrícula ou senha incorretos.")
+            LoginResult.Error(erro)
+        }
+    } catch (e: Exception) {
+        LoginResult.Error(
+            "Falha de conexão com o servidor: ${e.localizedMessage ?: "Verifique a internet"}"
+        )
+    }
+}
     /**
      * Encerra a sessão no servidor
      */
